@@ -135,11 +135,16 @@ def predict(device: str, FLAGS):
   eval_loss = []
   with torch.no_grad():
     for example_i, (positions, particle_type, n_particles_per_example) in enumerate(ds):
+
+      # positions, particle_type = add_static_objects(positions, particle_type)
+      # n_particles_per_example = len(particle_type)
+
       positions.to(device)
       particle_type.to(device)
       n_particles_per_example = torch.tensor([int(n_particles_per_example)], dtype=torch.int32).to(device)
 
       nsteps = metadata['sequence_length'] - INPUT_SEQUENCE_LENGTH
+      nsteps = positions.shape[1] - INPUT_SEQUENCE_LENGTH
       # Predict example rollout
       example_rollout, loss = rollout(simulator, positions.to(device), particle_type.to(device),
                                       n_particles_per_example.to(device), nsteps, device)
@@ -158,6 +163,29 @@ def predict(device: str, FLAGS):
 
   print("Mean loss on rollout prediction: {}".format(
       torch.mean(torch.cat(eval_loss))))
+
+def add_static_objects(positions, particle_type):
+
+    # p0 = (0.5, 0.2)
+    # p1 = (0.8, 0.1)
+    p0 = (0.3,0.2)
+    p1 = (0.5,0.25)
+    F = 40
+
+    new_items = []
+    for i in range(F):
+      x = p0[0] + (p1[0] - p0[0])/F * i
+      y = p0[1] + (p1[1] - p0[1])/F * i
+      new_items.append((x,y))
+    n = torch.tensor(new_items).reshape(F, 1, 2).repeat(1, positions.shape[1], 1)
+    positions = torch.cat([positions, n], 0)
+    particle_type = torch.cat([particle_type, torch.ones(F, dtype=torch.int32) * KINEMATIC_PARTICLE_ID], 0)
+
+    return positions, particle_type
+    # particle_type[:F] = KINEMATIC_PARTICLE_ID
+    # positions[:F, :, :] = positions[:F, :1, :].repeat(1,positions.shape[1],1)
+
+
 
 def optimizer_to(optim, device):
   for param in optim.state.values():

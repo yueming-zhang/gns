@@ -148,3 +148,7 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+data/
+vtk-Reality/
+vtk-GNS/
+gifs/

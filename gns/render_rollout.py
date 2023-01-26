@@ -57,7 +57,21 @@ def main(unused_argv):
 
   if not FLAGS.rollout_path:
     raise ValueError("A `rollout_path` must be passed.")
-  with open(FLAGS.rollout_path, "rb") as file:
+  
+  # if FLAGS.rollout_path ends with .pkl, render that file
+  if FLAGS.rollout_path.endswith(".pkl"):
+    render_rollout(FLAGS.rollout_path)
+    return
+
+  # loop through the rollout_path folder, and render_rollout for each file
+  for file in os.listdir(FLAGS.rollout_path):
+    if file.endswith(".pkl"):
+      render_rollout(FLAGS.rollout_path + file)
+    else:
+      continue
+
+def render_rollout(rollout_path):
+  with open(rollout_path, "rb") as file:
     rollout_data = pickle.load(file)
 
   fig, axes = plt.subplots(1, 2, figsize=(10, 5))
@@ -72,6 +86,8 @@ def main(unused_argv):
     if not os.path.exists(path):
       os.makedirs(path)
     arr = rollout_data[rollout_field]
+    if arr.shape[2] == 2:
+      arr = np.concatenate([arr, np.zeros((arr.shape[0], arr.shape[1], 1))], axis=2)
     coords0 = arr[0]
     for i in range(len(arr)):
       coords = arr[i]
@@ -113,7 +129,8 @@ def main(unused_argv):
       fig, update,
       frames=np.arange(0, num_steps, FLAGS.step_stride), interval=10)
 
-  unused_animation.save('rollout.gif', dpi=80, fps=30, writer='imagemagick')
+  gif_name = rollout_path[:-4] + ".gif"
+  unused_animation.save(gif_name, dpi=80, fps=30, writer='imagemagick')
   plt.show(block=FLAGS.block_on_show)
 
 
