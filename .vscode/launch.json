@@ -1,0 +1,138 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Train",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--data_path", "data/dataverse_files/gns-water-drop-sample/",
+                "--output_path", "data/dataverse_files/gns-water-drop-sample/output/",
+                "--model_path", "data/dataverse_files/gns-water-drop-sample/model/"
+                // "--model_file", "data/dataverse_files/gns-water-drop-sample/model/model.pt"
+            ]
+        },
+        {
+            "name": "Train-WaterWamps",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--data_path", "data/WaterRamps/",
+                "--output_path", "data/WaterRamps/output/",
+                "--model_path", "data/WaterRamps/model/"
+                // "--model_file", "data/dataverse_files/gns-water-drop-sample/model/model.pt"
+            ]
+        },
+        {
+            "name": "Resume",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--data_path", "data/dataverse_files/gns-water-drop-sample/",
+                "--output_path", "data/dataverse_files/gns-water-drop-sample/output/",
+                "--model_path", "data/dataverse_files/gns-water-drop-sample/model/",
+                "--model_file", "latest",
+                "--train_state_file", "latest"
+                // "-ntraining_steps", "100"
+
+            ]
+        },
+        {
+            "name": "Resume-WaterWamps",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--data_path", "data/WaterRamps/",
+                "--output_path", "data/WaterRamps/output/",
+                "--model_path", "data/WaterRamps/model/",
+                "--model_file", "latest",
+                "--train_state_file", "latest"
+                // "-ntraining_steps", "100"
+
+            ]
+        },
+        {
+            "name": "Rollout",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--mode", "rollout",
+                "--data_path", "data/dataverse_files/gns-water-drop-sample/",
+                "--output_path", "data/dataverse_files/gns-water-drop-sample/output/",
+                "--model_path", "data/dataverse_files/gns-water-drop-sample/model/",
+                "--train_state_file", "train_state-200000.pt",
+                "--model_file", "model-200000.pt"
+            ]
+        },
+        {
+            "name": "Rollout-WaterWamps",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--mode", "rollout",
+                "--data_path", "data/WaterRamps/",
+                "--output_path", "data/WaterRamps/output/",
+                "--model_path", "data/WaterRamps/model/",
+                "--train_state_file", "train_state-980000.pt",
+                "--model_file", "model-980000.pt"
+            ]
+        },
+        {
+            "name": "Render-WaterWamps",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--rollout_path", "data/WaterRamps/output/"
+            ]
+        },
+        {
+            "name": "Render",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--rollout_path", "data/dataverse_files/gns-water-drop-sample/output/rollout_1.pkl"
+            ]
+        },
+
+    ]
+}
+
+// python gns/train.py --mode rollout --data_path data/dataverse_files/gns-water-drop-sample/ --output_path data/dataverse_files/gns-water-drop-sample/output/ --model_path data/dataverse_files/gns-water-drop-sample/model/ --train_state_file train_state-200000.pt --model_file model-200000.pt
+// python gns/render_rollout.py --rollout_path data/dataverse_files/gns-water-drop-sample/output/rollout_1.pkl
+
+
+python gns/train.py --data_path data/WaterRamps/ --output_path data/WaterRamps/output/ --model_path data/WaterRamps/model/ --train_state_file train_state-260000.pt --model_file model-260000.pt
+
+
+python gns/train.py --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/
+python gns/train.py --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/ --train_state_file latest --model_file latest
+python gns/train.py --mode rollout --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/ --train_state_file train_state-245000.pt --model_file model-245000.pt
+python gns/render_rollout.py --rollout_path /mnt/d/Tmp/MultiMaterial/output/
+
