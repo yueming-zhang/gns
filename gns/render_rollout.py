@@ -78,8 +78,8 @@ def render_rollout(rollout_path):
 
   plot_info = []
   for ax_i, (label, rollout_field) in enumerate(
-      [("Reality", "ground_truth_rollout"),
-       ("GNS", "predicted_rollout")]):
+      [("Actual", "ground_truth_rollout"),
+       ("Predict", "predicted_rollout")]):
     
     # Write to VTK
     path = f"./vtk-{label}"       

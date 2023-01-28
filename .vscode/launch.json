@@ -10,12 +10,13 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true,
+            "justMyCode": false,
             "args": [
                 "--data_path", "data/dataverse_files/gns-water-drop-sample/",
                 "--output_path", "data/dataverse_files/gns-water-drop-sample/output/",
-                "--model_path", "data/dataverse_files/gns-water-drop-sample/model/"
+                "--model_path", "data/dataverse_files/gns-water-drop-sample/model/",
                 // "--model_file", "data/dataverse_files/gns-water-drop-sample/model/model.pt"
+                "--nsave_steps", "1000",
             ]
         },
         {
@@ -83,6 +84,22 @@
             ]
         },
         {
+            "name": "Valid",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--mode", "valid",
+                "--data_path", "data/dataverse_files/gns-water-drop-sample/",
+                "--output_path", "data/dataverse_files/gns-water-drop-sample/output/",
+                "--model_path", "data/dataverse_files/gns-water-drop-sample/model/",
+                "--train_state_file", "train_state-200000.pt",
+                "--model_file", "model-200000.pt"
+            ]
+        },
+        {
             "name": "Rollout-WaterWamps",
             "type": "python",
             "request": "launch",
@@ -128,11 +145,12 @@
 // python gns/render_rollout.py --rollout_path data/dataverse_files/gns-water-drop-sample/output/rollout_1.pkl
 
 
-python gns/train.py --data_path data/WaterRamps/ --output_path data/WaterRamps/output/ --model_path data/WaterRamps/model/ --train_state_file train_state-260000.pt --model_file model-260000.pt
+// python gns/train.py --data_path data/WaterRamps/ --output_path data/WaterRamps/output/ --model_path data/WaterRamps/model/ 
+// python gns/train.py --data_path data/WaterRamps/ --output_path data/WaterRamps/output/ --model_path data/WaterRamps/model/ --train_state_file train_state-260000.pt --model_file model-260000.pt
 
 
-python gns/train.py --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/
-python gns/train.py --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/ --train_state_file latest --model_file latest
-python gns/train.py --mode rollout --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/ --train_state_file train_state-245000.pt --model_file model-245000.pt
-python gns/render_rollout.py --rollout_path /mnt/d/Tmp/MultiMaterial/output/
+// python gns/train.py --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/
+// python gns/train.py --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/ --train_state_file latest --model_file latest
+// python gns/train.py --mode rollout --data_path /mnt/d/Tmp/MultiMaterial/ --output_path /mnt/d/Tmp/MultiMaterial/output/ --model_path /mnt/d/Tmp/MultiMaterial/model/ --train_state_file train_state-245000.pt --model_file model-245000.pt
+// python gns/render_rollout.py --rollout_path /mnt/d/Tmp/MultiMaterial/output/
 

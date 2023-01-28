@@ -9,6 +9,8 @@ import sys
 import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
+from tensorboardX import SummaryWriter
+from datetime import datetime
 
 from absl import flags
 from absl import app
@@ -42,6 +44,7 @@ flags.DEFINE_integer('lr_decay_steps', int(5e6), help='Learning rate decay steps
 flags.DEFINE_integer("cuda_device_number", None, help="CUDA device (zero indexed), default is None so default CUDA device will be used.")
 
 Stats = collections.namedtuple('Stats', ['mean', 'std'])
+tbx = None
 
 INPUT_SEQUENCE_LENGTH = 6  # So we can calculate the last 5 velocities.
 NUM_PARTICLE_TYPES = 9
@@ -104,19 +107,20 @@ def rollout(
   return output_dict, loss
 
 
-def predict(device: str, FLAGS):
+def predict(device: str, flags, model_fn=None, step=None, eval_count=0):
   """Predict rollouts.
 
   Args:
     simulator: Trained simulator if not will undergo training.
 
   """
-  metadata = reading_utils.read_metadata(FLAGS.data_path)
-  simulator = _get_simulator(metadata, FLAGS.noise_std, FLAGS.noise_std, device)
+  metadata = reading_utils.read_metadata(flags["data_path"])
+  simulator = _get_simulator(metadata, flags["noise_std"], flags["noise_std"], device)
 
   # Load simulator
-  if os.path.exists(FLAGS.model_path + FLAGS.model_file):
-    simulator.load(FLAGS.model_path + FLAGS.model_file)
+  model_fn = flags["model_path"] + flags["model_file"] if model_fn is None else model_fn
+  if os.path.exists(model_fn):
+    simulator.load(model_fn)
   else:
     train(simulator)
   
@@ -124,18 +128,19 @@ def predict(device: str, FLAGS):
   simulator.eval()
 
   # Output path
-  if not os.path.exists(FLAGS.output_path):
-    os.makedirs(FLAGS.output_path)
+  if not os.path.exists(flags["output_path"]):
+    os.makedirs(flags["output_path"])
 
   # Use `valid`` set for eval mode if not use `test`
-  split = 'test' if FLAGS.mode == 'rollout' else 'valid'
-
-  ds = data_loader.get_data_loader_by_trajectories(path=f"{FLAGS.data_path}{split}.npz")
+  split = 'test' if "mode" in flags and flags["mode"] == 'rollout' else 'valid'
+  data_path = flags["data_path"]
+  ds = data_loader.get_data_loader_by_trajectories(path=f"{data_path}{split}.npz")
 
   eval_loss = []
   with torch.no_grad():
     for example_i, (positions, particle_type, n_particles_per_example) in enumerate(ds):
-
+      if (eval_count != 0 and len(eval_loss) > eval_count):
+        break
       # positions, particle_type = add_static_objects(positions, particle_type)
       # n_particles_per_example = len(particle_type)
 
@@ -154,15 +159,18 @@ def predict(device: str, FLAGS):
       eval_loss.append(torch.flatten(loss))
       
       # Save rollout in testing
-      if FLAGS.mode == 'rollout':
+      if "mode" in flags and flags["mode"] == 'rollout':
         example_rollout['metadata'] = metadata
         filename = f'rollout_{example_i}.pkl'
-        filename = os.path.join(FLAGS.output_path, filename)
+        filename = os.path.join(flags["output_path"], filename)
         with open(filename, 'wb') as f:
           pickle.dump(example_rollout, f)
 
   print("Mean loss on rollout prediction: {}".format(
       torch.mean(torch.cat(eval_loss))))
+
+  if step is not None:
+    get_tbx(flags).add_scalar('eval/loss', torch.mean(torch.cat(eval_loss)), step)
 
 def add_static_objects(positions, particle_type):
 
@@ -260,6 +268,7 @@ def train(rank, flags, world_size):
 
   print(f"rank = {rank}, cuda = {torch.cuda.is_available()}")
   not_reached_nsteps = True
+  tbx_graph_added = False
   try:
     while not_reached_nsteps:
       torch.distributed.barrier()
@@ -275,6 +284,19 @@ def train(rank, flags, world_size):
         non_kinematic_mask = (particle_type != KINEMATIC_PARTICLE_ID).clone().detach().to(rank)
         sampled_noise *= non_kinematic_mask.view(-1, 1, 1)
 
+        if not tbx_graph_added:
+          # input_to_model = (labels.to(rank), sampled_noise.to(rank), position.to(rank), n_particles_per_example.to(rank), particle_type.to(rank))
+          # get_tbx(flags).add_graph(simulator.module, input_to_model=input_to_model)
+
+          input_to_model = (torch.zeros([1,128], device='cuda'), 
+                            torch.zeros([2, 1], dtype=torch.long, device='cuda'), 
+                            torch.zeros([1, 128], device='cuda'))
+          get_tbx(flags).add_graph(
+            simulator.module._encode_process_decode._processor,
+            input_to_model=input_to_model)
+
+          tbx_graph_added = True
+
         # Get the predictions and target accelerations.
         pred_acc, target_acc = simulator.module.predict_accelerations(
             next_positions=labels.to(rank),
@@ -287,8 +309,7 @@ def train(rank, flags, world_size):
         loss = (pred_acc - target_acc) ** 2
         loss = loss.sum(dim=-1)
         num_non_kinematic = non_kinematic_mask.sum()
-        loss = torch.where(non_kinematic_mask.bool(),
-                         loss, torch.zeros_like(loss))
+        loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
         loss = loss.sum() / num_non_kinematic
 
         # Computes the gradient of loss
@@ -304,11 +325,17 @@ def train(rank, flags, world_size):
         if rank == 0:
           print(f'Training step: {step}/{flags["ntraining_steps"]}. Loss: {loss}.')
 
+        if rank == 0 and step % 10 == 0 and step > 100:
+          get_tbx(flags).add_scalar('train/loss', loss, step)
+          
         # Save model state
         if step % flags["nsave_steps"] == 0 and rank == 0:
-          simulator.module.save(flags["model_path"] + 'model-'+str(step)+'.pt')
+          model_fn = flags["model_path"] + 'model-'+str(step)+'.pt'
+          simulator.module.save(model_fn)
           train_state = dict(optimizer_state=optimizer.state_dict(), global_train_state={"step":step})
           torch.save(train_state, f'{flags["model_path"]}train_state-{step}.pt')
+          if step >= 100:
+            predict('cuda', flags, model_fn=model_fn, step=step, eval_count = 20)
 
         # Complete training
         if (step >= flags["ntraining_steps"]):
@@ -373,6 +400,13 @@ def _get_simulator(
 
   return simulator
 
+def get_tbx(flags):
+  global tbx
+  if tbx is None:
+    # save tensorboard log to model_path/tensorboard
+    tbx_path = "/mnt/d/Stanford/tbx_logs/" + datetime.now().strftime('%Y%m%d-%H%M%S')
+    tbx = SummaryWriter(tbx_path)  
+  return tbx
 
 def main(_):
   """Train or evaluates the model.
@@ -393,6 +427,7 @@ def main(_):
   myflags["model_file"] = FLAGS.model_file
   myflags["model_path"] = FLAGS.model_path
   myflags["train_state_file"] = FLAGS.train_state_file
+  myflags["output_path"] = FLAGS.output_path
 
   # Read metadata
   if FLAGS.mode == 'train':

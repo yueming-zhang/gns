@@ -67,8 +67,20 @@ class LearnedSimulator(nn.Module):
 
     self._device = device
 
-  def forward(self):
+  def forward(self, 
+          next_positions: torch.tensor,
+          position_sequence_noise: torch.tensor,
+          position_sequence: torch.tensor,
+          nparticles_per_example: torch.tensor,
+          particle_types: torch.tensor):
     """Forward hook runs on class instantiation"""
+    res = self.predict_accelerations(
+              next_positions,
+              position_sequence_noise,
+              position_sequence,
+              nparticles_per_example,
+              particle_types)
+    return res
     pass
 
   def _compute_graph_connectivity(
