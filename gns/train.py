@@ -21,6 +21,7 @@ from gns import noise_utils
 from gns import reading_utils
 from gns import data_loader
 from gns import distribute
+from statistics import mean
 
 flags.DEFINE_enum(
     'mode', 'train', ['train', 'valid', 'rollout'],
@@ -170,7 +171,7 @@ def predict(device: str, flags, model_fn=None, step=None, eval_count=0):
       torch.mean(torch.cat(eval_loss))))
 
   if step is not None:
-    get_tbx(flags).add_scalar('eval/loss', torch.mean(torch.cat(eval_loss)), step)
+    get_tbx(flags).add_scalar('loss/3_eval', torch.mean(torch.cat(eval_loss)), step)
 
 def add_static_objects(positions, particle_type):
 
@@ -285,16 +286,7 @@ def train(rank, flags, world_size):
         sampled_noise *= non_kinematic_mask.view(-1, 1, 1)
 
         if not tbx_graph_added:
-          # input_to_model = (labels.to(rank), sampled_noise.to(rank), position.to(rank), n_particles_per_example.to(rank), particle_type.to(rank))
-          # get_tbx(flags).add_graph(simulator.module, input_to_model=input_to_model)
-
-          input_to_model = (torch.zeros([1,128], device='cuda'), 
-                            torch.zeros([2, 1], dtype=torch.long, device='cuda'), 
-                            torch.zeros([1, 128], device='cuda'))
-          get_tbx(flags).add_graph(
-            simulator.module._encode_process_decode._processor,
-            input_to_model=input_to_model)
-
+          add_architecture_graph(flags, simulator)
           tbx_graph_added = True
 
         # Get the predictions and target accelerations.
@@ -326,7 +318,10 @@ def train(rank, flags, world_size):
           print(f'Training step: {step}/{flags["ntraining_steps"]}. Loss: {loss}.')
 
         if rank == 0 and step % 10 == 0 and step > 100:
-          get_tbx(flags).add_scalar('train/loss', loss, step)
+          get_tbx(flags).add_scalar('loss/1_train', loss, step)
+          
+          if step % 200 == 0:
+            compute_valid_loss(flags, simulator, step)
           
         # Save model state
         if step % flags["nsave_steps"] == 0 and rank == 0:
@@ -354,6 +349,71 @@ def train(rank, flags, world_size):
 
   distribute.cleanup()
 
+def add_architecture_graph(flags, simulator):
+    # input_to_model = (labels.to(rank), sampled_noise.to(rank), position.to(rank), n_particles_per_example.to(rank), particle_type.to(rank))
+    # get_tbx(flags).add_graph(simulator.module, input_to_model=input_to_model)
+
+    # # -------- Add graph for encoder -------- #
+    # input_to_model = (torch.zeros([1,30], device='cuda'), 
+    #                         torch.zeros([1, 3], device='cuda'))
+    # get_tbx(flags).add_graph(
+    #         simulator.module._encode_process_decode._encoder,
+    #         input_to_model=input_to_model)
+
+    # # -------- Add graph for processor -------- #
+    input_to_model = (torch.zeros([1,128], device='cuda'), 
+                            torch.zeros([2, 1], dtype=torch.long, device='cuda'), 
+                            torch.zeros([1, 128], device='cuda'))
+    get_tbx(flags).add_graph(
+            simulator.module._encode_process_decode._processor,
+            input_to_model=input_to_model)
+
+    # -------- Add graph for decoder -------- #
+    # input_to_model = (torch.zeros([1,128], device='cuda'))
+    # get_tbx(flags).add_graph(
+    #         simulator.module._encode_process_decode._decoder,
+    #         input_to_model=input_to_model)
+
+
+def compute_valid_loss(flags, simulator, step):
+  rank = 0
+  dl = data_loader.get_data_loader_by_samples(f'{flags["data_path"]}valid.npz',
+                                          input_length_sequence=INPUT_SEQUENCE_LENGTH,  
+                                          batch_size=flags["batch_size"],
+                                          shuffle=False)
+
+  with torch.no_grad():
+    loss_lst = []
+    for ((position, particle_type, n_particles_per_example), labels) in dl:    
+      position.to(rank)
+      particle_type.to(rank)
+      n_particles_per_example.to(rank)
+      labels.to(rank)
+
+      # TODO (jpv): Move noise addition to data_loader
+      # Sample the noise to add to the inputs to the model during training.
+      sampled_noise = noise_utils.get_random_walk_noise_for_position_sequence(position, noise_std_last_step=flags["noise_std"]).to(rank)
+      non_kinematic_mask = (particle_type != KINEMATIC_PARTICLE_ID).clone().detach().to(rank)
+      sampled_noise *= non_kinematic_mask.view(-1, 1, 1)
+      
+      pred_acc, target_acc = simulator.module.predict_accelerations(
+          next_positions=labels.to(rank),
+          position_sequence_noise=sampled_noise.to(rank),
+          position_sequence=position.to(rank),
+          nparticles_per_example=n_particles_per_example.to(rank),
+          particle_types=particle_type.to(rank))
+
+      # Calculate the loss and mask out loss on kinematic particles
+      loss = (pred_acc - target_acc) ** 2
+      loss = loss.sum(dim=-1)
+      num_non_kinematic = non_kinematic_mask.sum()
+      loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
+      loss = loss.sum() / num_non_kinematic
+      loss_lst.append(loss.item())
+      if len(loss_lst) > 50:
+        break
+
+    get_tbx(flags).add_scalar('loss/2_valid', mean(loss_lst), step)
 
 def _get_simulator(
         metadata: json,
