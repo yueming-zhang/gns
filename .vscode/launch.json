@@ -5,6 +5,22 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "TrainCloth",
+            "type": "python",
+            "request": "launch",
+            "program": "gns/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--data_path", "data/cloth/",
+                "--output_path", "data/cloth/output/",
+                "--model_path", "data/cloth/model/",
+                // "--model_file", "data/dataverse_files/gns-water-drop-sample/model/model.pt"
+                "--nsave_steps", "1000",
+            ]
+        },
+
+        {
             "name": "Train",
             "type": "python",
             "request": "launch",
