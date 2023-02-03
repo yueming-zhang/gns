@@ -46,6 +46,8 @@ class LearnedSimulator(nn.Module):
 
     """
     super(LearnedSimulator, self).__init__()
+    self._balls = None
+    self._cloth_edge_index = None
     self._boundaries = boundaries
     self._connectivity_radius = connectivity_radius
     self._normalization_stats = normalization_stats
@@ -66,6 +68,28 @@ class LearnedSimulator(nn.Module):
         mlp_hidden_dim=mlp_hidden_dim)
 
     self._device = device
+
+  def set_balls(self, balls):
+    self._balls = balls
+
+  def get_cloth_edge_index(self, batch_ids):
+    if self._cloth_edge_index is None:
+      bc = torch.bincount(batch_ids)
+      assert torch.all(bc)
+      DIM = int(bc[0].sqrt())
+
+      np_cloth = np.arange(DIM*DIM*2).reshape(DIM*DIM, 2)
+      for i in range(DIM*DIM):
+          np_cloth[i] = [i//DIM, i%DIM]
+      np_cloth = np.tile(np_cloth, (len(bc), 1))
+      xy = torch.FloatTensor(np_cloth).to(self._device)
+      self._cloth_edge_index = radius_graph(xy, self._connectivity_radius, 
+                batch=batch_ids, loop=False) #Ming TODO: try loop=True
+
+      index_bc = torch.bincount(self._cloth_edge_index[0])
+      mean_neigbors = index_bc.double().mean()
+      assert mean_neigbors > 1 and mean_neigbors <= 18, 'shall within 2 rings'
+    return self._cloth_edge_index
 
   def forward(self, 
           next_positions: torch.tensor,
@@ -105,8 +129,12 @@ class LearnedSimulator(nn.Module):
 
     # radius_graph accepts r < radius not r <= radius
     # A torch tensor list of source and target nodes with shape (2, nedges)
-    edge_index = radius_graph(
-        node_features, r=radius, batch=batch_ids, loop=add_self_edges)
+    if self._balls is None:
+      edge_index = radius_graph(
+          node_features, r=radius, batch=batch_ids, loop=add_self_edges)
+    else:
+      # cloth drop training scenario, the graph edges are precomputed
+      edge_index = self.get_cloth_edge_index(batch_ids)
 
     # The flow direction when using in combination with message passing is
     # "source_to_target"
