@@ -69,8 +69,9 @@ class LearnedSimulator(nn.Module):
 
     self._device = device
 
-  def set_balls(self, balls):
+  def set_balls(self, balls, neighbour_search_size):
     self._balls = balls
+    self._neighbour_search_size = neighbour_search_size
 
   def get_cloth_edge_index(self, batch_ids):
     if self._cloth_edge_index is None:
@@ -83,13 +84,20 @@ class LearnedSimulator(nn.Module):
           np_cloth[i] = [i//DIM, i%DIM]
       np_cloth = np.tile(np_cloth, (len(bc), 1))
       xy = torch.FloatTensor(np_cloth).to(self._device)
-      self._cloth_edge_index = radius_graph(xy, self._connectivity_radius, 
+      self._cloth_edge_index = radius_graph(xy, self._neighbour_search_size, 
                 batch=batch_ids, loop=False) #Ming TODO: try loop=True
 
       index_bc = torch.bincount(self._cloth_edge_index[0])
       mean_neigbors = index_bc.double().mean()
-      assert mean_neigbors > 1 and mean_neigbors <= 18, 'shall within 2 rings'
+      assert mean_neigbors > 1 and mean_neigbors <= 100, 'shall within  rings'
+
+      # generate the cloth edge distance, no need to normalize as each tile is a square of 1
+      self._mesh_edge_distance = torch.norm(xy[self._cloth_edge_index[0]] - xy[self._cloth_edge_index[1]], dim=1).reshape(-1, 1)
+      
     return self._cloth_edge_index
+
+  def get_mesh_edige_distance(self):
+    return self._mesh_edge_distance
 
   def forward(self, 
           next_positions: torch.tensor,
@@ -178,22 +186,17 @@ class LearnedSimulator(nn.Module):
     # node_features shape (nparticles, 5 * 2 = 10)
     node_features.append(flat_velocity_sequence)
 
-    # Normalized clipped distances to lower and upper boundaries.
-    # boundaries are an array of shape [num_dimensions, 2], where the second
-    # axis, provides the lower/upper boundaries.
-    boundaries = torch.tensor(
-        self._boundaries, requires_grad=False).float().to(self._device)
-    distance_to_lower_boundary = (
-        most_recent_position - boundaries[:, 0][None])
-    distance_to_upper_boundary = (
-        boundaries[:, 1][None] - most_recent_position)
-    distance_to_boundaries = torch.cat(
-        [distance_to_lower_boundary, distance_to_upper_boundary], dim=1)
-    normalized_clipped_distance_to_boundaries = torch.clamp(
-        distance_to_boundaries / self._connectivity_radius, -1., 1.)
+    if self._balls is None:
+      # Normalized clipped distances to lower and upper boundaries.
+      # boundaries are an array of shape [num_dimensions, 2], where the second
+      # axis, provides the lower/upper boundaries.
+      obs_features = self.get_boundary_feature(most_recent_position)
+    else:
+      # cloth drop training scenario, the boundary features are precomputed
+      obs_features = self.get_ball_feature(most_recent_position)
     # The distance to 4 boundaries (top/bottom/left/right)
     # node_features shape (nparticles, 10+4)
-    node_features.append(normalized_clipped_distance_to_boundaries)
+    node_features.append(obs_features)
 
     # Particle type
     if self._nparticle_types > 1:
@@ -226,10 +229,44 @@ class LearnedSimulator(nn.Module):
     normalized_relative_distances = torch.norm(
         normalized_relative_displacements, dim=-1, keepdim=True)
     edge_features.append(normalized_relative_distances)
+    edge_features.append(self.get_mesh_edige_distance())
 
     return (torch.cat(node_features, dim=-1),
             torch.stack([senders, receivers]),
             torch.cat(edge_features, dim=-1))
+
+  def get_boundary_feature(self, most_recent_position):
+    boundaries = torch.tensor(
+      self._boundaries, requires_grad=False).float().to(self._device)
+    distance_to_lower_boundary = (
+      most_recent_position - boundaries[:, 0][None])
+    distance_to_upper_boundary = (
+      boundaries[:, 1][None] - most_recent_position)
+    distance_to_boundaries = torch.cat(
+      [distance_to_lower_boundary, distance_to_upper_boundary], dim=1)
+    normalized_clipped_distance_to_boundaries = torch.clamp(
+      distance_to_boundaries / self._connectivity_radius, -1., 1.)
+        
+    return normalized_clipped_distance_to_boundaries
+
+  def get_ball_feature(self, most_recent_position):
+    '''
+    calculated normalized distance to the ball:
+    1. calculate the distance to the ball center
+    2. normalize the distance to the ball radius
+    3. clip the distance to [-1, 1]
+    '''
+    ball_centers = torch.tensor(self._balls[0][:3], requires_grad=False).float().to(self._device)
+    ball_radius = torch.tensor(self._balls[0][3], requires_grad=False).float().to(self._device)
+    displacement = (most_recent_position - ball_centers)
+    distance = torch.norm(displacement, dim=-1, keepdim=True) - ball_radius
+    normalized_clipped_distance_to_ball = torch.clamp(distance/self._connectivity_radius, -1., 1.).reshape(-1, 1)
+    normalized_clipped_displacement_to_ball = torch.clamp(displacement/self._connectivity_radius, -1., 1.)
+
+    r = torch.cat([normalized_clipped_distance_to_ball.repeat(1,3), normalized_clipped_displacement_to_ball], dim=1)
+
+    return r
+
 
   def _decoder_postprocessor(
           self,

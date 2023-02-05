@@ -289,6 +289,9 @@ def train(rank, flags, world_size):
           add_architecture_graph(flags, simulator)
           tbx_graph_added = True
 
+        if 'balls' in metadata:
+          sampled_noise = torch.zeros_like(sampled_noise)
+
         # Get the predictions and target accelerations.
         pred_acc, target_acc = simulator.module.predict_accelerations(
             next_positions=labels.to(rank),
@@ -297,12 +300,19 @@ def train(rank, flags, world_size):
             nparticles_per_example=n_particles_per_example.to(rank),
             particle_types=particle_type.to(rank))
 
-        # Calculate the loss and mask out loss on kinematic particles
-        loss = (pred_acc - target_acc) ** 2
-        loss = loss.sum(dim=-1)
         num_non_kinematic = non_kinematic_mask.sum()
-        loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
-        loss = loss.sum() / num_non_kinematic
+        if not 'balls' in metadata:
+          # Calculate the loss and mask out loss on kinematic particles
+          loss = (pred_acc - target_acc) ** 2
+          loss = loss.sum(dim=-1)
+          loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
+          loss = loss.sum() / num_non_kinematic
+        else:
+          pred_next_position = simulator.module._decoder_postprocessor(pred_acc, position.to(rank))
+          loss = (pred_next_position - labels.to(rank)) ** 2
+          loss = loss.sum(dim=-1)
+          loss = loss.sum() / num_non_kinematic
+
 
         # Computes the gradient of loss
         optimizer.zero_grad()
@@ -314,13 +324,13 @@ def train(rank, flags, world_size):
         for param in optimizer.param_groups:
           param['lr'] = lr_new
 
-        if rank == 0:
+        if rank == 0 and step % 100 == 0:
           print(f'Training step: {step}/{flags["ntraining_steps"]}. Loss: {loss}.')
 
         if rank == 0 and step % 10 == 0 and step > 100:
           get_tbx(flags).add_scalar('loss/1_train', loss, step)
           
-          if step % 200 == 0:
+          if step % 500 == 0:
             compute_valid_loss(flags, simulator, step)
           
         # Save model state
@@ -446,7 +456,7 @@ def _get_simulator(
   simulator = learned_simulator.LearnedSimulator(
       particle_dimensions=metadata['dim'],
       nnode_in=37 if metadata['dim'] == 3 else 30,
-      nedge_in=metadata['dim'] + 1,
+      nedge_in=metadata['dim'] + 2, #keep both mesh distance and world distance
       latent_dim=128,
       nmessage_passing_steps=10,
       nmlp_layers=2,
@@ -457,6 +467,9 @@ def _get_simulator(
       nparticle_types=NUM_PARTICLE_TYPES,
       particle_type_embedding_size=16,
       device=device)
+
+  if 'balls' in metadata:
+    simulator.set_balls(metadata['balls'], metadata['neighbour_search_size'])
 
   return simulator
 
@@ -488,6 +501,7 @@ def main(_):
   myflags["model_path"] = FLAGS.model_path
   myflags["train_state_file"] = FLAGS.train_state_file
   myflags["output_path"] = FLAGS.output_path
+  myflags["mode"] = FLAGS.mode
 
   # Read metadata
   if FLAGS.mode == 'train':
@@ -501,10 +515,10 @@ def main(_):
 
   elif FLAGS.mode in ['valid', 'rollout']:
     # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if FLAGS.cuda_device_number is not None and torch.cuda.is_available():
       device = torch.device(f'cuda:{int(FLAGS.cuda_device_number)}')
-    predict(device, FLAGS)
+    predict(device, myflags)
 
 if __name__ == '__main__':
   app.run(main)
