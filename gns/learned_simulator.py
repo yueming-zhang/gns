@@ -5,6 +5,7 @@ from gns import graph_network
 from torch_geometric.nn import radius_graph
 from typing import Dict
 
+mesh_width = 32# torch.sqrt(nparticles_per_example).mean().type(torch.int)
 
 class LearnedSimulator(nn.Module):
   """Learned simulator from https://arxiv.org/pdf/2002.09405.pdf."""
@@ -69,9 +70,10 @@ class LearnedSimulator(nn.Module):
 
     self._device = device
 
-  def set_balls(self, balls, neighbour_search_size):
+  def set_balls(self, balls, neighbour_search_size, quad_size):
     self._balls = balls
     self._neighbour_search_size = neighbour_search_size
+    self._quad_size = quad_size
 
   def get_cloth_edge_index(self, batch_ids):
     if self._cloth_edge_index is None:
@@ -131,18 +133,18 @@ class LearnedSimulator(nn.Module):
       add_self_edges: Boolean flag to include self edge (default: True)
     """
     # Specify examples id for particles
-    batch_ids = torch.cat(
+    self.batch_ids = torch.cat(
         [torch.LongTensor([i for _ in range(n)])
          for i, n in enumerate(nparticles_per_example)]).to(self._device)
 
     # radius_graph accepts r < radius not r <= radius
     # A torch tensor list of source and target nodes with shape (2, nedges)
-    if self._balls is None:
+    if True or self._balls is None:
       edge_index = radius_graph(
-          node_features, r=radius, batch=batch_ids, loop=add_self_edges)
+          node_features, r=radius, batch=self.batch_ids, loop=add_self_edges)
     else:
       # cloth drop training scenario, the graph edges are precomputed
-      edge_index = self.get_cloth_edge_index(batch_ids)
+      edge_index = self.get_cloth_edge_index(self.batch_ids)
 
     # The flow direction when using in combination with message passing is
     # "source_to_target"
@@ -150,6 +152,23 @@ class LearnedSimulator(nn.Module):
     senders = edge_index[1, :]
 
     return receivers, senders
+
+  def get_mesh_distance(self, senders, receivers):
+    s_x = senders % mesh_width
+    s_y = senders // mesh_width
+    r_x = receivers % mesh_width
+    r_y = receivers // mesh_width
+    mesh_dist = ((s_x - r_x).square() + (s_y - r_y).square()).sqrt() * self._quad_size /self._connectivity_radius
+    return mesh_dist.reshape(-1, 1)
+
+  def get_mesh_displacement(self, senders, receivers):
+    s_x = senders % mesh_width
+    s_y = senders // mesh_width
+    r_x = receivers % mesh_width
+    r_y = receivers // mesh_width
+
+    normalized_relative_displacements = torch.cat([s_x - r_x,  s_y - r_y]) * self._quad_size /self._connectivity_radius
+    return normalized_relative_displacements.reshape(-1, 2)
 
   def _encoder_preprocessor(
           self,
@@ -229,7 +248,12 @@ class LearnedSimulator(nn.Module):
     normalized_relative_distances = torch.norm(
         normalized_relative_displacements, dim=-1, keepdim=True)
     edge_features.append(normalized_relative_distances)
-    edge_features.append(self.get_mesh_edige_distance())
+
+    mesh_disp = self.get_mesh_displacement(senders, receivers)
+    edge_features.append(mesh_disp)
+
+    mesh_dist = self.get_mesh_distance(senders, receivers)
+    edge_features.append(mesh_dist)
 
     return (torch.cat(node_features, dim=-1),
             torch.stack([senders, receivers]),
@@ -348,6 +372,8 @@ class LearnedSimulator(nn.Module):
       Tensors of shape (nparticles_in_batch, dim) with the predicted and target
         normalized accelerations.
 
+      also return the edge distances calculated from the predicted positions
+
     """
 
     # Add noise to the input position sequence.
@@ -373,7 +399,11 @@ class LearnedSimulator(nn.Module):
     #   as `next_position_adjusted - noisy_position_sequence[:,-1]`
     #   matches the ground truth next velocity (noise cancels out).
 
-    return predicted_normalized_acceleration, target_normalized_acceleration
+    pred_next_position = self._decoder_postprocessor(predicted_normalized_acceleration, noisy_position_sequence)
+    mesh_graph = self.get_cloth_edge_index(self.batch_ids)
+    world_distances = torch.norm(pred_next_position[mesh_graph[0]] - pred_next_position[mesh_graph[1]], dim=1) / self._connectivity_radius
+    mesh_distances = self.get_mesh_distance(mesh_graph[0], mesh_graph[1]).reshape(-1)
+    return predicted_normalized_acceleration, target_normalized_acceleration, mesh_distances-world_distances
 
   def _inverse_decoder_postprocessor(
           self,

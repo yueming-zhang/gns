@@ -289,11 +289,11 @@ def train(rank, flags, world_size):
           add_architecture_graph(flags, simulator)
           tbx_graph_added = True
 
-        if 'balls' in metadata:
-          sampled_noise = torch.zeros_like(sampled_noise)
+        # if 'balls' in metadata:
+        #   sampled_noise = torch.zeros_like(sampled_noise)
 
         # Get the predictions and target accelerations.
-        pred_acc, target_acc = simulator.module.predict_accelerations(
+        pred_acc, target_acc, delta_dist = simulator.module.predict_accelerations(
             next_positions=labels.to(rank),
             position_sequence_noise=sampled_noise.to(rank),
             position_sequence=position.to(rank),
@@ -301,12 +301,16 @@ def train(rank, flags, world_size):
             particle_types=particle_type.to(rank))
 
         num_non_kinematic = non_kinematic_mask.sum()
-        if not 'balls' in metadata:
+        if True or not 'balls' in metadata:
           # Calculate the loss and mask out loss on kinematic particles
           loss = (pred_acc - target_acc) ** 2
           loss = loss.sum(dim=-1)
           loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
           loss = loss.sum() / num_non_kinematic
+
+          # Add the loss on the distance between nodes to enforce smaller than mesh size.
+          loss_2 = torch.linalg.vector_norm(torch.where(delta_dist>0, 0, delta_dist))
+          loss = loss + loss_2/num_non_kinematic
         else:
           pred_next_position = simulator.module._decoder_postprocessor(pred_acc, position.to(rank))
           loss = (pred_next_position - labels.to(rank)) ** 2
@@ -406,7 +410,7 @@ def compute_valid_loss(flags, simulator, step):
       non_kinematic_mask = (particle_type != KINEMATIC_PARTICLE_ID).clone().detach().to(rank)
       sampled_noise *= non_kinematic_mask.view(-1, 1, 1)
       
-      pred_acc, target_acc = simulator.module.predict_accelerations(
+      pred_acc, target_acc, _ = simulator.module.predict_accelerations(
           next_positions=labels.to(rank),
           position_sequence_noise=sampled_noise.to(rank),
           position_sequence=position.to(rank),
@@ -456,7 +460,7 @@ def _get_simulator(
   simulator = learned_simulator.LearnedSimulator(
       particle_dimensions=metadata['dim'],
       nnode_in=37 if metadata['dim'] == 3 else 30,
-      nedge_in=metadata['dim'] + 2, #keep both mesh distance and world distance
+      nedge_in=metadata['dim'] + 4, # already have world displacement, we add mesh distance, world distance, and mesh displacement
       latent_dim=128,
       nmessage_passing_steps=10,
       nmlp_layers=2,
@@ -469,7 +473,7 @@ def _get_simulator(
       device=device)
 
   if 'balls' in metadata:
-    simulator.set_balls(metadata['balls'], metadata['neighbour_search_size'])
+    simulator.set_balls(metadata['balls'], metadata['neighbour_search_size'], metadata['quad_size'])
 
   return simulator
 
