@@ -154,3 +154,5 @@ vtk-GNS/
 gifs/
 vtk-Actual/
 vtk-Predict/
+
+!metadata.json

@@ -293,7 +293,7 @@ def train(rank, flags, world_size):
         #   sampled_noise = torch.zeros_like(sampled_noise)
 
         # Get the predictions and target accelerations.
-        pred_acc, target_acc, delta_dist, ball_dist = simulator.module.predict_accelerations(
+        pred_acc, target_acc, delta_dist, _ = simulator.module.predict_accelerations(
             next_positions=labels.to(rank),
             position_sequence_noise=sampled_noise.to(rank),
             position_sequence=position.to(rank),
@@ -306,14 +306,11 @@ def train(rank, flags, world_size):
           loss = (pred_acc - target_acc) ** 2
           loss = loss.sum(dim=-1)
           loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
-          loss = loss.sum()
+          loss = loss.sum() / num_non_kinematic
 
           # Add the loss on the distance between nodes to enforce smaller than mesh size.
-          loss_2 = torch.where(delta_dist>-metadata['default_connectivity_radius']*0.2, 0, delta_dist)
-          loss_2 = (loss_2 ** 2).sum(dim=-1)
-
-          loss_3 = (ball_dist ** 2).sum(dim=-1)
-          loss = (loss + loss_2)/num_non_kinematic
+          loss_2 = torch.linalg.vector_norm(torch.where(delta_dist>0, 0, delta_dist))
+          loss = loss + loss_2/num_non_kinematic
         else:
           pred_next_position = simulator.module._decoder_postprocessor(pred_acc, position.to(rank))
           loss = (pred_next_position - labels.to(rank)) ** 2
