@@ -98,9 +98,37 @@ class LearnedSimulator(nn.Module):
       
     return self._cloth_edge_index
 
-  def get_mesh_edige_distance(self):
-    return self._mesh_edge_distance
 
+  def get_cloth_edge_index_new(self, batch_ids):
+    if self.cloth_edge_index is None:
+      bc = torch.bincount(batch_ids)
+      # assert torch.all(bc)
+      # assert mesh_width == int(bc[0].sqrt())
+
+      np_cloth = np.arange(mesh_width*mesh_width*2).reshape(mesh_width*mesh_width, 2)
+      for i in range(mesh_width*mesh_width):
+          np_cloth[i] = [i//mesh_width, i%mesh_width]
+      xy = torch.FloatTensor(np_cloth).to(self._device)
+      base_mesh_graph = radius_graph(xy, self._neighbour_search_size, batch=None, loop=False) 
+      self.cloth_edge_index = base_mesh_graph
+      for i in range(1, len(bc)):
+        next = base_mesh_graph + bc[0]*i
+        self.cloth_edge_index = torch.cat([self.cloth_edge_index, next], axis=1)
+
+      # np_cloth = np.tile(np_cloth, (len(bc), 1))
+      # self.cloth_edge_index = radius_graph(xy, self._neighbour_search_size, 
+      #           batch=batch_ids, loop=False) #Ming TODO: try loop=True
+
+      index_bc = torch.bincount(self.cloth_edge_index[0])
+      mean_neigbors = index_bc.double().mean()
+      assert mean_neigbors > 1 and mean_neigbors <= 100, 'shall within  rings'
+
+      # generate the cloth edge distance, no need to normalize as each tile is a square of 1
+      # self._mesh_edge_distance = torch.norm(xy[self.cloth_edge_index[0]] - xy[self.cloth_edge_index[1]], dim=1).reshape(-1, 1)
+      
+    return self.cloth_edge_index
+
+  
   def forward(self, 
           next_positions: torch.tensor,
           position_sequence_noise: torch.tensor,
@@ -142,6 +170,7 @@ class LearnedSimulator(nn.Module):
     if True or self._balls is None:
       edge_index = radius_graph(
           node_features, r=radius, batch=self.batch_ids, loop=add_self_edges)
+      self.get_cloth_edge_index(self.batch_ids)
     else:
       # cloth drop training scenario, the graph edges are precomputed
       edge_index = self.get_cloth_edge_index(self.batch_ids)
@@ -153,6 +182,25 @@ class LearnedSimulator(nn.Module):
 
     return receivers, senders
 
+  # def get_mesh_distance_new(self, senders, receivers, particle_types):
+  #   mesh_dist = torch.norm(self.get_mesh_displacement(senders, receivers, particle_types), dim=1)
+  #   return mesh_dist.reshape(-1, 1)
+
+  # def get_mesh_displacement_new(self, senders, receivers, particle_types):
+  #   bc = self.batch_ids.bincount()[0]
+  #   s_x = (senders % bc)
+  #   s_y = (senders % bc)
+  #   r_x = (receivers % bc)
+  #   r_y = (receivers % bc)
+
+  #   d_x = torch.where( s_x < mesh_width * mesh_width, s_x % mesh_width - r_x % mesh_width, 10)
+  #   d_y = torch.where( s_y < mesh_width * mesh_width, s_y // mesh_width - r_y // mesh_width, 10)
+
+  #   self._normalized_relative_displacements = torch.cat([d_x.reshape(-1,1), d_y.reshape(-1,1)], axis=1) \
+  #                                             * self._quad_size /self._connectivity_radius
+  #   # self._normalized_relative_displacements = self._normalized_relative_displacements.reshape(-1, 2)
+  #   return self._normalized_relative_displacements
+  
   def get_mesh_distance(self, senders, receivers):
     s_x = senders % mesh_width
     s_y = senders // mesh_width
@@ -167,8 +215,9 @@ class LearnedSimulator(nn.Module):
     r_x = receivers % mesh_width
     r_y = receivers // mesh_width
 
-    normalized_relative_displacements = torch.cat([s_x - r_x,  s_y - r_y]) * self._quad_size /self._connectivity_radius
-    return normalized_relative_displacements.reshape(-1, 2)
+    normalized_relative_displacements = torch.cat([(s_x - r_x).reshape(-1,1),  (s_y - r_y).reshape(-1,1)], axis=1) \
+                                        * self._quad_size /self._connectivity_radius
+    return normalized_relative_displacements
 
   def _encoder_preprocessor(
           self,
@@ -403,7 +452,16 @@ class LearnedSimulator(nn.Module):
     mesh_graph = self.get_cloth_edge_index(self.batch_ids)
     world_distances = torch.norm(pred_next_position[mesh_graph[0]] - pred_next_position[mesh_graph[1]], dim=1) / self._connectivity_radius
     mesh_distances = self.get_mesh_distance(mesh_graph[0], mesh_graph[1]).reshape(-1)
-    return predicted_normalized_acceleration, target_normalized_acceleration, mesh_distances-world_distances
+
+    delta_dist = mesh_distances-world_distances
+
+    ball_centers = torch.tensor(self._balls[0][:3], requires_grad=False).float().to(self._device)
+    ball_radius = torch.tensor(self._balls[0][3], requires_grad=False).float().to(self._device)
+
+    dist_to_ball = torch.norm(pred_next_position - ball_centers, dim=1) - ball_radius
+    dist_to_ball = torch.clamp(dist_to_ball / self._connectivity_radius, max=0) ** 3 #penalize being inside the ball
+ 
+    return predicted_normalized_acceleration, target_normalized_acceleration, delta_dist, dist_to_ball
 
   def _inverse_decoder_postprocessor(
           self,

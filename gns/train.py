@@ -293,7 +293,7 @@ def train(rank, flags, world_size):
         #   sampled_noise = torch.zeros_like(sampled_noise)
 
         # Get the predictions and target accelerations.
-        pred_acc, target_acc, delta_dist = simulator.module.predict_accelerations(
+        pred_acc, target_acc, delta_dist, ball_dist = simulator.module.predict_accelerations(
             next_positions=labels.to(rank),
             position_sequence_noise=sampled_noise.to(rank),
             position_sequence=position.to(rank),
@@ -306,11 +306,14 @@ def train(rank, flags, world_size):
           loss = (pred_acc - target_acc) ** 2
           loss = loss.sum(dim=-1)
           loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
-          loss = loss.sum() / num_non_kinematic
+          loss = loss.sum()
 
           # Add the loss on the distance between nodes to enforce smaller than mesh size.
-          loss_2 = torch.linalg.vector_norm(torch.where(delta_dist>0, 0, delta_dist))
-          loss = loss + loss_2/num_non_kinematic
+          loss_2 = torch.where(delta_dist>-metadata['default_connectivity_radius']*0.2, 0, delta_dist)
+          loss_2 = (loss_2 ** 2).sum(dim=-1)
+
+          loss_3 = (ball_dist ** 2).sum(dim=-1)
+          loss = (loss + loss_2)/num_non_kinematic
         else:
           pred_next_position = simulator.module._decoder_postprocessor(pred_acc, position.to(rank))
           loss = (pred_next_position - labels.to(rank)) ** 2
@@ -410,7 +413,7 @@ def compute_valid_loss(flags, simulator, step):
       non_kinematic_mask = (particle_type != KINEMATIC_PARTICLE_ID).clone().detach().to(rank)
       sampled_noise *= non_kinematic_mask.view(-1, 1, 1)
       
-      pred_acc, target_acc, _ = simulator.module.predict_accelerations(
+      pred_acc, target_acc, _, _ = simulator.module.predict_accelerations(
           next_positions=labels.to(rank),
           position_sequence_noise=sampled_noise.to(rank),
           position_sequence=position.to(rank),
