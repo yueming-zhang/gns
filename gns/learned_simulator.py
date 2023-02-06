@@ -453,7 +453,7 @@ class LearnedSimulator(nn.Module):
     world_distances = torch.norm(pred_next_position[mesh_graph[0]] - pred_next_position[mesh_graph[1]], dim=1) / self._connectivity_radius
     mesh_distances = self.get_mesh_distance(mesh_graph[0], mesh_graph[1]).reshape(-1)
 
-    delta_dist = mesh_distances-world_distances
+    delta_dist_pct = (mesh_distances-world_distances)/(mesh_distances + 1e-6)
 
     ball_centers = torch.tensor(self._balls[0][:3], requires_grad=False).float().to(self._device)
     ball_radius = torch.tensor(self._balls[0][3], requires_grad=False).float().to(self._device)
@@ -461,7 +461,7 @@ class LearnedSimulator(nn.Module):
     dist_to_ball = torch.norm(pred_next_position - ball_centers, dim=1) - ball_radius
     dist_to_ball = torch.clamp(dist_to_ball / self._connectivity_radius, max=0) ** 3 #penalize being inside the ball
  
-    return predicted_normalized_acceleration, target_normalized_acceleration, delta_dist, dist_to_ball
+    return predicted_normalized_acceleration, target_normalized_acceleration, delta_dist_pct, dist_to_ball
 
   def _inverse_decoder_postprocessor(
           self,
