@@ -22,7 +22,7 @@ def spawn_train(train_fxn, flags, world_size):
                                )
 
 
-def get_data_distributed_dataloader_by_samples(path, input_length_sequence, batch_size, shuffle=False):
+def get_data_distributed_dataloader_by_samples(path, input_length_sequence, batch_size, shuffle=True):
     dataset = data_loader.SamplesDataset(path, input_length_sequence)
     sampler = DistributedSampler(dataset, shuffle=shuffle)
     return torch.utils.data.DataLoader(dataset=dataset, sampler=sampler, batch_size=batch_size,

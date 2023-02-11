@@ -309,9 +309,10 @@ def train(rank, flags, world_size):
           loss = loss.sum() 
 
           # Add the loss on the distance between nodes to enforce smaller than mesh size.
-          r = metadata['default_connectivity_radius']
-          loss_2 = torch.linalg.vector_norm(torch.where(delta_dist_pct > -.2, 0, delta_dist_pct))
-          loss = (loss + loss_2)/num_non_kinematic
+          # loss_2 = (delta_dist_pct.max() - 0.1).clamp(min=0)
+          loss_2 = torch.linalg.vector_norm(torch.where(delta_dist_pct > -.1, 0, delta_dist_pct))
+          # loss_2 = torch.linalg.vector_norm(torch.clamp(delta_dist_pct, max=-.2))
+          loss = (loss + loss_2) / num_non_kinematic
         else:
           pred_next_position = simulator.module._decoder_postprocessor(pred_acc, position.to(rank))
           loss = (pred_next_position - labels.to(rank)) ** 2
@@ -334,7 +335,7 @@ def train(rank, flags, world_size):
 
         if rank == 0 and step % 10 == 0 and step > 100:
           get_tbx(flags).add_scalar('loss/1_train', loss, step)
-          get_tbx(flags).add_scalar('in_ball/1_train', torch.mean(-dist2ball), step)
+          # get_tbx(flags).add_scalar('in_ball/1_train', torch.mean(-dist2ball), step)
           
           if step % 500 == 0:
             compute_valid_loss(flags, simulator, step)
@@ -430,7 +431,7 @@ def compute_valid_loss(flags, simulator, step):
         break
 
     get_tbx(flags).add_scalar('loss/2_valid', mean(loss_lst), step)
-    get_tbx(flags).add_scalar('in_ball/2_valid', torch.mean(-dist2ball), step)
+    # get_tbx(flags).add_scalar('in_ball/2_valid', torch.mean(-dist2ball), step)
 
 
 def _get_simulator(
@@ -523,7 +524,8 @@ def main(_):
 
   elif FLAGS.mode in ['valid', 'rollout']:
     # Set device
-    device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    #device = 'cpu'
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if FLAGS.cuda_device_number is not None and torch.cuda.is_available():
       device = torch.device(f'cuda:{int(FLAGS.cuda_device_number)}')
     predict(device, myflags)
