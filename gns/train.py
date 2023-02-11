@@ -293,12 +293,34 @@ def train(rank, flags, world_size):
         #   sampled_noise = torch.zeros_like(sampled_noise)
 
         # Get the predictions and target accelerations.
-        pred_acc, target_acc, delta_dist_pct, dist2ball = simulator.module.predict_accelerations(
-            next_positions=labels.to(rank),
-            position_sequence_noise=sampled_noise.to(rank),
-            position_sequence=position.to(rank),
-            nparticles_per_example=n_particles_per_example.to(rank),
-            particle_types=particle_type.to(rank))
+        position = position.to(rank)
+        if data_loader.prediction_skip == 0:
+          pred_acc, target_acc, delta_dist_pct, pred_next_position = simulator.module.predict_accelerations(
+              next_positions=labels.to(rank),
+              position_sequence_noise=sampled_noise.to(rank),
+              position_sequence=position,
+              nparticles_per_example=n_particles_per_example.to(rank),
+              particle_types=particle_type.to(rank))
+
+        elif data_loader.prediction_skip == 1:
+          _, _, _, pred_next_position = simulator.module.predict_accelerations(
+              None,
+              position_sequence_noise=sampled_noise.to(rank),
+              position_sequence=position,
+              nparticles_per_example=n_particles_per_example.to(rank),
+              particle_types=particle_type.to(rank))
+
+          # append the pred_next_position to the position sequence, and remove the top of the sequence.
+          position = torch.cat([position[:, 1:, :], pred_next_position.unsqueeze(1)], dim=1)
+
+          pred_acc, target_acc, delta_dist_pct, pred_next_position = simulator.module.predict_accelerations(
+              next_positions=labels.to(rank),
+              position_sequence_noise=sampled_noise.to(rank),
+              position_sequence=position,
+              nparticles_per_example=n_particles_per_example.to(rank),
+              particle_types=particle_type.to(rank))
+        else:
+          assert False, "prediction_skip must be 0 or 1"    
 
         num_non_kinematic = non_kinematic_mask.sum()
         if True or not 'balls' in metadata:
@@ -495,7 +517,7 @@ def main(_):
 
   """
   os.environ["MASTER_ADDR"] = "localhost"
-  os.environ["MASTER_PORT"] = "29500"
+  os.environ["MASTER_PORT"] = "29500"#"29600"#
   FLAGS = flags.FLAGS
   myflags = {}
   myflags["data_path"] = FLAGS.data_path

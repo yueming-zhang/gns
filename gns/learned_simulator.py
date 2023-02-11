@@ -193,8 +193,8 @@ class LearnedSimulator(nn.Module):
     r = (receivers % bc)
 
     # only return mesh distance when both sender and receiver are mesh particles
-    d_x = torch.where( torch.logical_and(s < self.mesh_size, r < self.mesh_size), s // mesh_width - r // mesh_width, 100)
-    d_y = torch.where( torch.logical_and(s < self.mesh_size, r < self.mesh_size), s % mesh_width - r % mesh_width, 100)
+    d_x = torch.where( torch.logical_and(s < self.mesh_size, r < self.mesh_size), s % mesh_width - r % mesh_width, 100)
+    d_y = torch.where( torch.logical_and(s < self.mesh_size, r < self.mesh_size), s // mesh_width - r // mesh_width, 100)
 
     self._normalized_relative_displacements = torch.cat([d_x.reshape(-1,1), d_y.reshape(-1,1)], axis=1) \
                                               * self._quad_size /self._connectivity_radius
@@ -340,7 +340,6 @@ class LearnedSimulator(nn.Module):
     normalized_clipped_distance_to_ball_surface = torch.clamp(normalized_distance_to_ball_surface, -1., 1.)
 
     # normalized_clipped_displacement_to_ball = torch.clamp(displacement/self._connectivity_radius, -1., 1.)
-
     # normalized_displacement_to_ball = ((most_recent_position - ball_centers) * ball_radius / distance + ball_centers)/self._connectivity_radius
 
     r = torch.cat([normalized_clipped_distance_to_ball_surface.repeat(1,3), normalized_displacement_to_ball_center], dim=1)
@@ -443,9 +442,12 @@ class LearnedSimulator(nn.Module):
 
     # Calculate the target acceleration, using an `adjusted_next_position `that
     # is shifted by the noise in the last input position.
-    next_position_adjusted = next_positions + position_sequence_noise[:, -1]
-    target_normalized_acceleration = self._inverse_decoder_postprocessor(
-        next_position_adjusted, noisy_position_sequence)
+    if next_positions is not None:
+      next_position_adjusted = next_positions + position_sequence_noise[:, -1]
+      target_normalized_acceleration = self._inverse_decoder_postprocessor(
+          next_position_adjusted, noisy_position_sequence)
+    else:
+      target_normalized_acceleration = None
     # As a result the inverted Euler update in the `_inverse_decoder` produces:
     # * A target acceleration that does not explicitly correct for the noise in
     #   the input positions, as the `next_position_adjusted` is different
@@ -462,13 +464,7 @@ class LearnedSimulator(nn.Module):
 
     delta_dist_pct = (mesh_distances-world_distances)/(mesh_distances)# + 1e-6)
 
-    # ball_centers = torch.tensor(self._balls[0][:3], requires_grad=False).float().to(self._device)
-    # ball_radius = torch.tensor(self._balls[0][3], requires_grad=False).float().to(self._device)
-
-    # dist_to_ball = torch.norm(pred_next_position - ball_centers, dim=1) - ball_radius
-    # dist_to_ball = torch.clamp(dist_to_ball / self._connectivity_radius, max=0)
- 
-    return predicted_normalized_acceleration, target_normalized_acceleration, delta_dist_pct, 0
+    return predicted_normalized_acceleration, target_normalized_acceleration, delta_dist_pct, pred_next_position
 
   def _inverse_decoder_postprocessor(
           self,

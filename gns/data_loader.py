@@ -4,6 +4,7 @@ import functools
 import os
 import json
 
+prediction_skip = 0
 class SamplesDataset(torch.utils.data.Dataset):
 
     def __init__(self, path, input_length_sequence):
@@ -23,7 +24,7 @@ class SamplesDataset(torch.utils.data.Dataset):
         # may (and likely is) variable between data
         self._dimension = self._data[0][0].shape[-1]
         self._input_length_sequence = input_length_sequence
-        self._data_lengths = [x.shape[0] - self._input_length_sequence for x, _ in self._data]
+        self._data_lengths = [x.shape[0] - self._input_length_sequence - prediction_skip for x, _ in self._data]
         self._length = sum(self._data_lengths)
 
         # pre-compute cumulative lengths
@@ -49,7 +50,7 @@ class SamplesDataset(torch.utils.data.Dataset):
         positions = np.transpose(positions, (1, 0, 2)) # nparticles, input_sequence_length, dimension
         particle_type = np.full(positions.shape[0], self._data[trajectory_idx][1], dtype=int)
         n_particles_per_example = positions.shape[0]
-        label = self._data[trajectory_idx][0][time_idx]
+        label = self._data[trajectory_idx][0][time_idx+prediction_skip]
 
         return ((positions, particle_type, n_particles_per_example), label)
 
