@@ -331,13 +331,19 @@ class LearnedSimulator(nn.Module):
     '''
     ball_centers = torch.tensor(self._balls[0][:3], requires_grad=False).float().to(self._device)
     ball_radius = torch.tensor(self._balls[0][3], requires_grad=False).float().to(self._device)
-    displacement = (most_recent_position - ball_centers)
-    distance = torch.norm(displacement, dim=-1, keepdim=True) - ball_radius
-    normalized_clipped_distance_to_ball = torch.clamp(distance/self._connectivity_radius, -1., 1.).reshape(-1, 1)
-    normalized_clipped_displacement_to_ball = torch.clamp(displacement/self._connectivity_radius, -1., 1.)
-    #normalized_displacement_to_ball = displacement/self._connectivity_radius
 
-    r = torch.cat([normalized_clipped_distance_to_ball.repeat(1,3), normalized_clipped_displacement_to_ball], dim=1)
+    displacement_to_ball_center = (most_recent_position - ball_centers)
+    normalized_displacement_to_ball_center = displacement_to_ball_center/self._connectivity_radius
+
+    distance_to_ball_surface = torch.norm(displacement_to_ball_center, dim=-1, keepdim=True) - ball_radius
+    normalized_distance_to_ball_surface = (distance_to_ball_surface/self._connectivity_radius).reshape(-1, 1)
+    normalized_clipped_distance_to_ball_surface = torch.clamp(normalized_distance_to_ball_surface, -1., 1.)
+
+    # normalized_clipped_displacement_to_ball = torch.clamp(displacement/self._connectivity_radius, -1., 1.)
+
+    # normalized_displacement_to_ball = ((most_recent_position - ball_centers) * ball_radius / distance + ball_centers)/self._connectivity_radius
+
+    r = torch.cat([normalized_clipped_distance_to_ball_surface.repeat(1,3), normalized_displacement_to_ball_center], dim=1)
 
     return r
 
