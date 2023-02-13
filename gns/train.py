@@ -331,10 +331,13 @@ def train(rank, flags, world_size):
           loss = loss.sum() 
 
           # Add the loss on the distance between nodes to enforce smaller than mesh size.
-          # loss_2 = (delta_dist_pct.max() - 0.1).clamp(min=0)
-          loss_2 = torch.linalg.vector_norm(torch.where(delta_dist_pct > -.1, 0, delta_dist_pct))
-          # loss_2 = torch.linalg.vector_norm(torch.clamp(delta_dist_pct, max=-.2))
-          loss = (loss + loss_2) / num_non_kinematic
+          # delta_dist_pct = torch.where(delta_dist_pct > -.1, 0, delta_dist_pct)
+          delta_dist_pct = torch.clamp(delta_dist_pct + .1, max=0)
+          loss_2 = (delta_dist_pct ** 2).mean()/10
+
+          # loss_2 = torch.linalg.vector_norm(torch.where(delta_dist_pct > -.1, 0, delta_dist_pct))
+
+          loss = loss / num_non_kinematic + loss_2
         else:
           pred_next_position = simulator.module._decoder_postprocessor(pred_acc, position.to(rank))
           loss = (pred_next_position - labels.to(rank)) ** 2
@@ -517,7 +520,7 @@ def main(_):
 
   """
   os.environ["MASTER_ADDR"] = "localhost"
-  os.environ["MASTER_PORT"] = "29500"#"29600"#
+  os.environ["MASTER_PORT"] = "29600"#
   FLAGS = flags.FLAGS
   myflags = {}
   myflags["data_path"] = FLAGS.data_path
@@ -546,7 +549,7 @@ def main(_):
 
   elif FLAGS.mode in ['valid', 'rollout']:
     # Set device
-    #device = 'cpu'
+    device = 'cpu'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if FLAGS.cuda_device_number is not None and torch.cuda.is_available():
       device = torch.device(f'cuda:{int(FLAGS.cuda_device_number)}')

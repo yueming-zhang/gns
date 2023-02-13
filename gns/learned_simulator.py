@@ -76,39 +76,16 @@ class LearnedSimulator(nn.Module):
     self._neighbour_search_size = neighbour_search_size
     self._quad_size = quad_size
 
-  def get_cloth_edge_index_v0(self, batch_ids):
+  def get_mesh_edge_index(self, batch_ids):
+    '''
+    return the rest stage mesh edge index to compose the cloth graph
+    '''
     if self._cloth_edge_index is None:
       bc = torch.bincount(batch_ids)
-      assert torch.all(bc)
-      DIM = int(bc[0].sqrt())
-
-      np_cloth = np.arange(DIM*DIM*2).reshape(DIM*DIM, 2)
-      for i in range(DIM*DIM):
-          np_cloth[i] = [i//DIM, i%DIM]
-      np_cloth = np.tile(np_cloth, (len(bc), 1))
-      xy = torch.FloatTensor(np_cloth).to(self._device)
-      self._cloth_edge_index = radius_graph(xy, self._neighbour_search_size, 
-                batch=batch_ids, loop=False) #Ming TODO: try loop=True
-
-      index_bc = torch.bincount(self._cloth_edge_index[0])
-      mean_neigbors = index_bc.double().mean()
-      assert mean_neigbors > 1 and mean_neigbors <= 100, 'shall within  rings'
-
-      # generate the cloth edge distance, no need to normalize as each tile is a square of 1
-      self._mesh_edge_distance = torch.norm(xy[self._cloth_edge_index[0]] - xy[self._cloth_edge_index[1]], dim=1).reshape(-1, 1)
-      
-    return self._cloth_edge_index
-
-
-  def get_cloth_edge_index(self, batch_ids):
-    if self._cloth_edge_index is None:
-      bc = torch.bincount(batch_ids)
-      # assert torch.all(bc)
-      # assert mesh_width == int(bc[0].sqrt())
 
       np_cloth = np.arange(mesh_width*mesh_width*2).reshape(mesh_width*mesh_width, 2)
       for i in range(mesh_width*mesh_width):
-          np_cloth[i] = [i//mesh_width, i%mesh_width]
+          np_cloth[i] = [i%mesh_width, i//mesh_width]
       xy = torch.FloatTensor(np_cloth).to(self._device)
       base_mesh_graph = radius_graph(xy, self._neighbour_search_size, batch=None, loop=False) 
       self._cloth_edge_index = base_mesh_graph
@@ -116,19 +93,23 @@ class LearnedSimulator(nn.Module):
         next = base_mesh_graph + bc[0]*i
         self._cloth_edge_index = torch.cat([self._cloth_edge_index, next], axis=1)
 
-      # np_cloth = np.tile(np_cloth, (len(bc), 1))
-      # self.cloth_edge_index = radius_graph(xy, self._neighbour_search_size, 
-      #           batch=batch_ids, loop=False) #Ming TODO: try loop=True
-
       index_bc = torch.bincount(self._cloth_edge_index[0])
       mean_neigbors = index_bc.double().mean()
       assert mean_neigbors > 1 and mean_neigbors <= 100, 'shall within  rings'
 
-      # generate the cloth edge distance, no need to normalize as each tile is a square of 1
-      # self._mesh_edge_distance = torch.norm(xy[self.cloth_edge_index[0]] - xy[self.cloth_edge_index[1]], dim=1).reshape(-1, 1)
-      
     return self._cloth_edge_index
 
+  def merge_world_mesh_graph(self, mesh_index, world_index):
+    '''
+    use pytorch to merge the mesh graph with the world graph unless 
+    the world_index already exist in the mesh_index
+    '''
+
+    w_in_m = torch.isin(world_index[0] + world_index[1] * 1000000, mesh_index[0] + mesh_index[1] * 1000000)
+    new_index = torch.where(w_in_m==False)[0]
+    new_edges = world_index[:, new_index]
+    ret = torch.cat([mesh_index, new_edges], axis=1)
+    return ret
   
   def forward(self, 
           next_positions: torch.tensor,
@@ -168,13 +149,14 @@ class LearnedSimulator(nn.Module):
 
     # radius_graph accepts r < radius not r <= radius
     # A torch tensor list of source and target nodes with shape (2, nedges)
-    if True or self._balls is None:
-      edge_index = radius_graph(
-          node_features, r=radius, batch=self.batch_ids, loop=add_self_edges)
-      self.get_cloth_edge_index(self.batch_ids)
+    if self._balls is None:
+      edge_index = radius_graph(node_features, r=radius, batch=self.batch_ids, loop=add_self_edges)
+      self.get_mesh_edge_index(self.batch_ids)
     else:
       # cloth drop training scenario, the graph edges are precomputed
-      edge_index = self.get_cloth_edge_index(self.batch_ids)
+      mesh_index = self.get_mesh_edge_index(self.batch_ids)
+      world_index = radius_graph(node_features, r=radius, batch=self.batch_ids, loop=add_self_edges)
+      edge_index = self.merge_world_mesh_graph(mesh_index, world_index)
 
     # The flow direction when using in combination with message passing is
     # "source_to_target"
@@ -201,24 +183,6 @@ class LearnedSimulator(nn.Module):
     # self._normalized_relative_displacements = self._normalized_relative_displacements.reshape(-1, 2)
     return self._normalized_relative_displacements
   
-  def get_mesh_distance_v0(self, senders, receivers):
-    s_x = senders % mesh_width
-    s_y = senders // mesh_width
-    r_x = receivers % mesh_width
-    r_y = receivers // mesh_width
-    mesh_dist = ((s_x - r_x).square() + (s_y - r_y).square()).sqrt() * self._quad_size /self._connectivity_radius
-    return mesh_dist.reshape(-1, 1)
-
-  def get_mesh_displacement_v0(self, senders, receivers):
-    s_x = senders % mesh_width
-    s_y = senders // mesh_width
-    r_x = receivers % mesh_width
-    r_y = receivers // mesh_width
-
-    normalized_relative_displacements = torch.cat([(s_x - r_x).reshape(-1,1),  (s_y - r_y).reshape(-1,1)], axis=1) \
-                                        * self._quad_size /self._connectivity_radius
-    return normalized_relative_displacements
-
   def _encoder_preprocessor(
           self,
           position_sequence: torch.tensor,
@@ -335,7 +299,8 @@ class LearnedSimulator(nn.Module):
     displacement_to_ball_center = (most_recent_position - ball_centers)
     normalized_displacement_to_ball_center = displacement_to_ball_center/self._connectivity_radius
 
-    distance_to_ball_surface = torch.norm(displacement_to_ball_center, dim=-1, keepdim=True) - ball_radius
+    distance_to_ball_center = torch.norm(displacement_to_ball_center, dim=-1, keepdim=True)
+    distance_to_ball_surface = distance_to_ball_center - ball_radius
     normalized_distance_to_ball_surface = (distance_to_ball_surface/self._connectivity_radius).reshape(-1, 1)
     normalized_clipped_distance_to_ball_surface = torch.clamp(normalized_distance_to_ball_surface, -1., 1.)
 
@@ -446,6 +411,15 @@ class LearnedSimulator(nn.Module):
       next_position_adjusted = next_positions + position_sequence_noise[:, -1]
       target_normalized_acceleration = self._inverse_decoder_postprocessor(
           next_position_adjusted, noisy_position_sequence)
+
+#-------------------- debug: calculate the target next position from target_normalized_acceleration
+      # target_next_positions = self._decoder_postprocessor(target_normalized_acceleration, position_sequence)
+      # # calculate diplacements between target_next_positions and next_positions, assert they are small
+      # displacements = target_next_positions - next_positions
+      # assert torch.all(torch.norm(displacements, dim=1) < 1e-3)
+
+#--------------------
+
     else:
       target_normalized_acceleration = None
     # As a result the inverted Euler update in the `_inverse_decoder` produces:
@@ -458,11 +432,16 @@ class LearnedSimulator(nn.Module):
     #   matches the ground truth next velocity (noise cancels out).
 
     pred_next_position = self._decoder_postprocessor(predicted_normalized_acceleration, noisy_position_sequence)
-    mesh_graph = self.get_cloth_edge_index(self.batch_ids)
+    mesh_graph = self.get_mesh_edge_index(self.batch_ids)
     world_distances = torch.norm(pred_next_position[mesh_graph[0]] - pred_next_position[mesh_graph[1]], dim=1) / self._connectivity_radius
     mesh_distances = self.get_mesh_distance(mesh_graph[0], mesh_graph[1]).reshape(-1)
 
     delta_dist_pct = (mesh_distances-world_distances)/(mesh_distances)# + 1e-6)
+
+    # loop through each edge in mesh_graph, check if one node of the edge has particle_type 3, if so, assert the delta_dist_pct is positive
+    # for i in range(len(mesh_graph[0])):
+    #   if particle_types[mesh_graph[0][i]] == 3 or particle_types[mesh_graph[1][i]] == 3:
+    #     assert delta_dist_pct[i] > 0
 
     return predicted_normalized_acceleration, target_normalized_acceleration, delta_dist_pct, pred_next_position
 
