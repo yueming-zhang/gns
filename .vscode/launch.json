@@ -201,7 +201,7 @@ python gns/train.py --data_path data/cloth/ --output_path data/cloth/output/ --m
 python gns/train.py --data_path /mnt/d/Stanford/Taichi/data1/ --output_path /mnt/d/Stanford/Taichi/data1/output/ --model_path /mnt/d/Stanford/Taichi/data1/model/
 
 // Continue training
-python gns/train.py --data_path data/cloth/ --output_path data/cloth/output/ --model_path data/cloth/model/ --model_file latest --train_state_file latest
+python gns/train.py --data_path /mnt/d/Stanford/Taichi/data1/ --output_path /mnt/d/Stanford/Taichi/data1/output/ --model_path /mnt/d/Stanford/Taichi/data1/model/ --model_file latest --train_state_file latest
 
 // roullout
 python gns/train.py --mode rollout --data_path data/cloth/ --output_path data/cloth/output/ --model_path data/cloth/model/ --train_state_file train_state-30000.pt --model_file model-30000.pt

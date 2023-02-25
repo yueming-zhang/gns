@@ -286,7 +286,7 @@ def train(rank, flags, world_size):
         sampled_noise *= non_kinematic_mask.view(-1, 1, 1)
 
         if not tbx_graph_added:
-          add_architecture_graph(flags, simulator)
+          # add_architecture_graph(flags, simulator)
           tbx_graph_added = True
 
         # if 'balls' in metadata:
@@ -330,12 +330,14 @@ def train(rank, flags, world_size):
           loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
           loss = loss.sum() 
 
-          # Add the loss on the distance between nodes to enforce smaller than mesh size.
-          # delta_dist_pct = torch.where(delta_dist_pct > -.1, 0, delta_dist_pct)
-          delta_dist_pct = torch.clamp(delta_dist_pct + .1, max=0)
-          loss_2 = (delta_dist_pct ** 2).mean()/10
+          # Add the loss on the distance between nodes to enforce the mesh integrity: 
+          # penalize nodes that with world_distance greater than the mesh distance
+          # delta_dist_pct = (mesh_distance-world_distance) / mesh_distance
+          tension_margin = 0.1 # hyper-parameter depends on the tension of the mesh
+          weight = 0.1 
 
-          # loss_2 = torch.linalg.vector_norm(torch.where(delta_dist_pct > -.1, 0, delta_dist_pct))
+          delta_dist_pct = torch.clamp(delta_dist_pct + tension_margin, max=0)
+          loss_2 = (delta_dist_pct ** 2).mean() * weight
 
           loss = loss / num_non_kinematic + loss_2
         else:
@@ -422,7 +424,7 @@ def compute_valid_loss(flags, simulator, step):
   dl = data_loader.get_data_loader_by_samples(f'{flags["data_path"]}valid.npz',
                                           input_length_sequence=INPUT_SEQUENCE_LENGTH,  
                                           batch_size=flags["batch_size"],
-                                          shuffle=False)
+                                          shuffle=True)
 
   with torch.no_grad():
     loss_lst = []
