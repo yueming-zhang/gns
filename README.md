@@ -9,6 +9,15 @@
 
 > Joseph Vantassel, Texas Advanced Computing Center, UT Austin.
 
+## CS224W Project
+We use this repo as the starting point to simulate a cloth drop on a ball. With our enhancement, we are able to generating below result: 
+![Cloth Rollout](rollout_1.gif)
+
+
+To see how we enhance the original model, please refer to this link for details: https://medium.com/@bill.s.lin1/graph-network-based-simulator-of-cloth-falling-through-obstacles-cef3e066a41e
+
+-------------------------------
+
 Graph Network-based Simulator (GNS) is a framework for developing generalizable, efficient, and accurate machine learning (ML)-based surrogate models for particulate and fluid systems using Graph Neural Networks (GNNs). GNS code is a viable surrogate for numerical methods such as Material Point Method, Smooth Particle Hydrodynamics and Computational Fluid dynamics. GNS exploits distributed data parallelism to achieve fast multi-GPU training. The GNS code can handle complex boundary conditions and multi-material interactions.
 
 ## Run GNS
