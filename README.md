@@ -67,7 +67,7 @@ The renderer also writes `.vtu` files to visualize in ParaView.
 
 ## Datasets
 
-# Original paper dataset
+### Original paper dataset
 
 The data loader provided with this PyTorch implementation utilizes the more general `.npz` format. The `.npz` format includes a list of
 tuples of arbitrary length where each tuple is for a different training trajectory
@@ -88,7 +88,7 @@ We provide the following datasets:
 
 Download the dataset from [DesignSafe DataDepot](https://doi.org/10.17603/ds2-0phb-dg64). If you are using this dataset please cite [Vantassel and Kumar., 2022](https://github.com/geoelements/gns#dataset)
 
-# Our cloth setting 
+### Our cloth setting 
 We used the open source [Taichi physics simulator](https://docs.taichi-lang.org/blog/head-first-taichi) to generate the source-of-truth dataset by running 1000 experiments of a piece of cloth falling onto a spherical obstacle. You can find the dataset that we generated [here](https://drive.google.com/drive/folders/1q03NoTLQbFenZIVOehBDadiSx32mbxl6?usp=share_link).
 
 
