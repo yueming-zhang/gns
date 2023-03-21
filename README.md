@@ -25,6 +25,10 @@ Graph Network-based Simulator (GNS) is a framework for developing generalizable,
 ```shell
 python3 -m gns.train --data_path="<input-training-data-path>" --model_path="<path-to-load-save-model-file>" --output_path="<path-to-save-output>" -ntraining_steps=100
 ```
+> Our cloth setting
+```shell
+python gns/train.py --data_path data/cloth/ --output_path data/cloth/output/ --model_path data/cloth/model/
+```
 
 > Resume training
 
@@ -33,23 +37,37 @@ To resume training specify `model_file` and `train_state_file`:
 ```shell
 python3 -m gns.train --data_path="<input-training-data-path>" --model_path="<path-to-load-save-model-file>" --output_path="<path-to-save-output>"  --model_file="model.pt" --train_state_file="train_state.pt" -ntraining_steps=100
 ```
+> Our cloth setting
+```shell
+python gns/train.py --data_path data/cloth/ --output_path data/cloth/output/ --model_path data/cloth/model/ --model_file model-30000.pt --train_state_file train_state-30000.pt
+```
 
 > Rollout
 ```shell
 python3 -m gns.train --mode="rollout" --data_path="<input-data-path>" --model_path="<path-to-load-save-model-file>" --output_path="<path-to-save-output>" --model_file="model.pt" --train_state_file="train_state.pt"
+```
+> Our cloth setting
+```shell
+python gns/train.py --mode rollout --data_path data/cloth/ --output_path data/cloth/output/ --model_path data/cloth/model/ --train_state_file train_state-30000.pt --model_file model-30000.pt
 ```
 
 > Render
 ```shell
  python3 -m gns.render_rollout --rollout_path="<path-containing-rollout-file>/rollout_0.pkl" 
 ```
+> Our cloth setting
+```shell
+python gns/render_rollout.py --rollout_path data/cloth/output/
+```
 
 The renderer also writes `.vtu` files to visualize in ParaView.
 
-![Sand rollout](figs/rollout_0.gif)
-> GNS prediction of Sand rollout after training for 2 million steps.
+<!-- ![Sand rollout](figs/rollout_0.gif)
+> GNS prediction of Sand rollout after training for 2 million steps. -->
 
 ## Datasets
+
+# Original paper dataset
 
 The data loader provided with this PyTorch implementation utilizes the more general `.npz` format. The `.npz` format includes a list of
 tuples of arbitrary length where each tuple is for a different training trajectory
@@ -69,6 +87,9 @@ We provide the following datasets:
   * `SandRamps`
 
 Download the dataset from [DesignSafe DataDepot](https://doi.org/10.17603/ds2-0phb-dg64). If you are using this dataset please cite [Vantassel and Kumar., 2022](https://github.com/geoelements/gns#dataset)
+
+# Our cloth setting 
+We used the open source [Taichi physics simulator](https://docs.taichi-lang.org/blog/head-first-taichi) to generate the source-of-truth dataset by running 1000 experiments of a piece of cloth falling onto a spherical obstacle. You can find the dataset that we generated [here](https://drive.google.com/drive/folders/1q03NoTLQbFenZIVOehBDadiSx32mbxl6?usp=share_link).
 
 
 ## Building environment on TACC LS6 and Frontera
